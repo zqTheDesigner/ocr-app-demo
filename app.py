@@ -10,6 +10,8 @@ csv_data = None
 original_image = None
 annotated_image = None
 boxes_visible = True  # default to show boxes
+image_filename = ''
+pil_image = None
 
 def load_csv(file):
     global csv_data
@@ -18,15 +20,26 @@ def load_csv(file):
     return csv_data
 
 def draw_boxes_on_image(img, df, show_boxes=True):
+    global original_image, image_filename
     if not show_boxes or df is None or img is None:
         return img
 
-    img = img.convert("RGBA")
+    # Filter dataframe by image filename if provided
+    if image_filename is not None:
+        # base_name = os.path.splitext(os.path.basename(image_filename))[0]
+        df = df[df['file_name'].str.contains(image_filename, na=False)]
+        if df.empty:
+            return img  # No matching annotations for this image
+    print(original_image)
+            
+    img = pil_image.convert("RGBA")
     base = Image.new("RGBA", img.size, (0,0,0,0))  # Transparent layer
     draw = ImageDraw.Draw(base)
 
     # font = ImageFont.truetype("Helvetica.ttf", size=12)
-    font = ImageFont.truetype('STHeiti Light.ttc', size=36)
+    # font = ImageFont.truetype('STHeiti Light.ttc', size=36) # For mac
+    # font = ImageFont.truetype("Arial Unicode.ttf", size=36)
+    font = ImageFont.load_default()
 
     for _, row in df.iterrows():
         polygon = ast.literal_eval(row["polygon"])
@@ -66,6 +79,8 @@ def draw_boxes_on_image(img, df, show_boxes=True):
 def process_image(image):
     global original_image, csv_data, annotated_image, boxes_visible
     original_image = image
+    # Get filename from Gradio image object
+    image_filename = image.name if hasattr(image, 'name') else None
     annotated_image = draw_boxes_on_image(image, csv_data, show_boxes=boxes_visible)
     return annotated_image
 
@@ -73,6 +88,7 @@ def process_image(image):
 def toggle_boxes():
     global boxes_visible, original_image, csv_data
     boxes_visible = not boxes_visible
+    image_filename = original_image.name if hasattr(original_image, 'name') else None
     img = draw_boxes_on_image(original_image, csv_data, show_boxes=boxes_visible)
     return img
 
@@ -86,11 +102,16 @@ def store_images(images):
     image_storage = images  # store the list of images
     return f"{len(images)} image(s) stored."
 
+def load_image(image):
+    global image_filename, pil_image 
+    pil_image = Image.open(image)
+    image_filename = image.split('/')[-1].split('.')[0]
+    
 
 with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column():
-            image_input = gr.Image(label="Upload Image", type="pil")
+            image_input = gr.Image(label="Upload Image", type="filepath")
             annotate_button = gr.Button("Annotate Text")
             toggle_button = gr.Button("Toggle Bounding Boxes")
         with gr.Column():
@@ -106,6 +127,7 @@ with gr.Blocks() as demo:
 
     image_display = gr.Image(label="Annotated Image", type="pil")
 
+    image_input.change(fn=load_image, inputs=image_input)
     csv_input.change(fn=load_csv, inputs=csv_input, outputs=table_output)
     annotate_button.click(fn=process_image, inputs=image_input, outputs=image_display)
     toggle_button.click(fn=toggle_boxes, outputs=image_display)
